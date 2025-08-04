@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pymysql
 from decouple import config
+import yfinance as yf
 
 app = Flask(__name__)
 CORS(app)
@@ -22,11 +23,9 @@ def get_companies():
     try:
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT symbol, long_name, sector, industry, market_cap FROM companies LIMIT 20")
+                cursor.execute("SELECT symbol, long_name, sector, industry, market_cap FROM companies")
                 companies = cursor.fetchall()
-                # print(companies)
                 return jsonify(companies)
-                
     except Exception as e:
         print(f"Error in get_companies: {e}")
         return jsonify({"error": "An error occurred while fetching companies."}), 500
@@ -46,16 +45,64 @@ def get_company(symbol):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Create a new company
+# Create a new company using yfinance
 @app.route('/api/companies', methods=['POST'])
 def create_company():
+    data = request.get_json()
+    if not data or 'ticker' not in data:
+        return jsonify({"error": "Ticker symbol is required"}), 400
+    
+    ticker_symbol = data['ticker']
+    
     try:
-        data = request.get_json()
+        # Fetch data from yfinance
+        ticker = yf.Ticker(ticker_symbol)
+        info = ticker.info
+
+        if not info or info.get('trailingPegRatio') is None:
+             return jsonify({"error": f"Could not find data for ticker: {ticker_symbol}"}), 404
+
+        # Prepare data for insertion
+        company_data = {
+            'exchange': info.get('exchange'),
+            'symbol': info.get('symbol'),
+            'short_name': info.get('shortName'),
+            'long_name': info.get('longName'),
+            'sector': info.get('sector'),
+            'industry': info.get('industry'),
+            'current_price': info.get('currentPrice'),
+            'market_cap': info.get('marketCap'),
+            'ebitda': info.get('ebitda'),
+            'revenue_growth': info.get('revenueGrowth'),
+            'city': info.get('city'),
+            'state': info.get('state'),
+            'country': info.get('country'),
+            'full_time_employees': info.get('fullTimeEmployees'),
+            'long_business_summary': info.get('longBusinessSummary'),
+            'weight': info.get('weight')
+        }
+
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
-                sql = "INSERT INTO companies (exchange, symbol, short_name, long_name, sector, industry, current_price, market_cap, ebitda, revenue_growth, city, state, country, full_time_employees, long_business_summary, weight) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-                cursor.execute(sql, (data['exchange'], data['symbol'], data['short_name'], data['long_name'], data['sector'], data['industry'], data['current_price'], data['market_cap'], data['ebitda'], data['revenue_growth'], data['city'], data['state'], data['country'], data['full_time_employees'], data['long_business_summary'], data['weight']))
-            return jsonify({"message": "Company created successfully"}), 201
+                sql = """
+                INSERT INTO companies (exchange, symbol, short_name, long_name, sector, industry, 
+                                     current_price, market_cap, ebitda, revenue_growth, city, state, 
+                                     country, full_time_employees, long_business_summary, weight)
+                VALUES (%(exchange)s, %(symbol)s, %(short_name)s, %(long_name)s, %(sector)s, %(industry)s,
+                        %(current_price)s, %(market_cap)s, %(ebitda)s, %(revenue_growth)s, %(city)s,
+                        %(state)s, %(country)s, %(full_time_employees)s, %(long_business_summary)s, %(weight)s)
+                ON DUPLICATE KEY UPDATE
+                    exchange=VALUES(exchange), short_name=VALUES(short_name), long_name=VALUES(long_name),
+                    sector=VALUES(sector), industry=VALUES(industry), current_price=VALUES(current_price),
+                    market_cap=VALUES(market_cap), ebitda=VALUES(ebitda), revenue_growth=VALUES(revenue_growth),
+                    city=VALUES(city), state=VALUES(state), country=VALUES(country),
+                    full_time_employees=VALUES(full_time_employees), 
+                    long_business_summary=VALUES(long_business_summary), weight=VALUES(weight);
+                """
+                cursor.execute(sql, company_data)
+        
+        return jsonify({"message": f"Company {ticker_symbol} added/updated successfully"}), 201
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -93,7 +140,6 @@ def search_companies():
                 sql = "SELECT * FROM companies WHERE long_name LIKE %s OR short_name LIKE %s"
                 cursor.execute(sql, (f"%{keyword}%", f"%{keyword}%"))
                 companies = cursor.fetchall()
-                print(companies)
                 return jsonify(companies)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -221,6 +267,52 @@ def delete_portfolio_asset(ticker):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/portfolio/summary/<int:account_id>', methods=['GET'])
+def get_portfolio_summary(account_id):
+    try:
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT * FROM portfolio_summary WHERE account_id = %s", (account_id,))
+                summary = cursor.fetchone()
+                if summary:
+                    return jsonify(summary)
+                else:
+                    return jsonify({"error": "No summary data found for this account."}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/risk/var/<int:account_id>', methods=['POST'])
+def calculate_var_route(account_id):
+    try:
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.callproc('CalculateVaR', (account_id,))
+        return jsonify({"message": "VaR calculation initiated."}), 202
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/risk/sharpe/<int:account_id>', methods=['POST'])
+def calculate_sharpe_route(account_id):
+    try:
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.callproc('CalculateSharpeRatio', (account_id,))
+        return jsonify({"message": "Sharpe Ratio calculation initiated."}), 202
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/risk/drawdown/<int:account_id>', methods=['GET'])
+def get_drawdown_route(account_id):
+    try:
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.callproc('CalculateDrawdown', (account_id,))
+                result = cursor.fetchall()
+                return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True)
