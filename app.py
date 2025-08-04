@@ -24,7 +24,9 @@ def get_companies():
             with connection.cursor() as cursor:
                 cursor.execute("SELECT symbol, long_name, sector, industry, market_cap FROM companies LIMIT 20")
                 companies = cursor.fetchall()
+                # print(companies)
                 return jsonify(companies)
+                
     except Exception as e:
         print(f"Error in get_companies: {e}")
         return jsonify({"error": "An error occurred while fetching companies."}), 500
@@ -91,6 +93,7 @@ def search_companies():
                 sql = "SELECT * FROM companies WHERE long_name LIKE %s OR short_name LIKE %s"
                 cursor.execute(sql, (f"%{keyword}%", f"%{keyword}%"))
                 companies = cursor.fetchall()
+                print(companies)
                 return jsonify(companies)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -193,6 +196,29 @@ def add_portfolio_asset():
                 """, (security_id, quantity))
                 
                 return jsonify({"message": "Asset added successfully"}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/portfolio/<string:ticker>', methods=['DELETE'])
+def delete_portfolio_asset(ticker):
+    try:
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                # First, get the security_id from the ticker
+                cursor.execute("SELECT security_id FROM security WHERE ticker = %s", (ticker,))
+                security = cursor.fetchone()
+                if not security:
+                    return jsonify({"error": "Security not found"}), 404
+                security_id = security['security_id']
+
+                # Delete the holding, assuming account_id = 1
+                result = cursor.execute("DELETE FROM portfolio_holding WHERE account_id = 1 AND security_id = %s", (security_id,))
+                
+                if result > 0:
+                    return jsonify({"message": "Asset deleted successfully"}), 200
+                else:
+                    return jsonify({"error": "Asset not found in portfolio"}), 404
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
