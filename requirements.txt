@@ -1,0 +1,6 @@
+pandas
+python-decouple
+SQLAlchemy
+PyMySQL
+Flask
+Flask-Cors
