@@ -23,7 +23,7 @@ def get_companies():
     try:
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT symbol, long_name, sector, industry, market_cap FROM companies")
+                cursor.execute("SELECT symbol, long_name, sector, industry, market_cap, current_price FROM companies")
                 companies = cursor.fetchall()
                 return jsonify(companies)
     except Exception as e:
@@ -232,20 +232,33 @@ def get_securities():
 @app.route('/api/portfolio', methods=['GET'])
 def get_portfolio():
     try:
+        # Assuming a fixed account_id for now
+        account_id = 1
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
-                # Assuming a fixed account_id for now
-                account_id = 1
-                cursor.execute("""
-                    SELECT s.ticker, ph.quantity, ph.book_cost
-                    FROM portfolio_holding ph
-                    JOIN security s ON ph.security_id = s.security_id
-                    WHERE ph.account_id = %s
-                """, (account_id,))
+                sql = """
+                    SELECT 
+                        s.ticker, 
+                        c.short_name as name,
+                        ph.quantity,
+                        c.current_price as price,
+                        (ph.quantity * c.current_price) as value
+                    FROM 
+                        portfolio_holding ph
+                    JOIN 
+                        security s ON ph.security_id = s.security_id
+                    JOIN
+                        companies c ON s.ticker = c.symbol
+                    WHERE 
+                        ph.account_id = %s
+                """
+                cursor.execute(sql, (account_id,))
                 portfolio = cursor.fetchall()
                 return jsonify(portfolio)
     except Exception as e:
+        print(f"Error in get_portfolio: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/portfolio/add', methods=['POST'])
 def add_portfolio_asset():
