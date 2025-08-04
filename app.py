@@ -143,6 +143,34 @@ def search_companies():
                 return jsonify(companies)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+# Update a portfolio asset
+@app.route('/api/portfolio/<string:ticker>', methods=['PUT'])
+def update_portfolio_asset(ticker):
+    try:
+        data = request.get_json()
+        quantity = data.get('quantity')
+        # Assuming a fixed account_id for now
+        account_id = 1
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                # Get security_id from ticker
+                cursor.execute("SELECT security_id FROM security WHERE ticker = %s", (ticker,))
+                security = cursor.fetchone()
+                if not security:
+                    return jsonify({"error": "Security not found"}), 404
+                security_id = security['security_id']
+
+                # Update portfolio_holding
+                cursor.execute("""
+                    UPDATE portfolio_holding 
+                    SET quantity = %s 
+                    WHERE account_id = %s AND security_id = %s
+                """, (quantity, account_id, security_id))
+                
+                return jsonify({"message": "Asset updated successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # Transaction: Transfer a security between two accounts
 @app.route('/api/transactions/transfer', methods=['POST'])
